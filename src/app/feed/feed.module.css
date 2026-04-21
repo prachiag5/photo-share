@@ -1,0 +1,54 @@
+/* feed.module.css */
+.shell {
+  display:    flex;
+  height:     100%;
+  overflow:   hidden;
+  /* Remove max-width from shell — let main handle centering */
+}
+
+.sidebar {
+  width:        240px;
+  padding:      32px 24px;
+  position:     sticky;
+  top:          0;
+  height:       100vh;
+  flex-shrink:  0;
+  border-right: 1px solid var(--color-border-tertiary);
+}
+
+.main {
+  flex:           1;
+  min-width:      0;
+  overflow:       hidden;
+  padding:        24px 0;          /* remove horizontal padding — card centers itself */
+  display:        flex;
+  flex-direction: column;
+}
+
+/* Feed items are centered by PostCard's margin: 0 auto + maxWidth: 468px */
+
+.logo {
+  display:       block;
+  font-weight:   700;
+  font-size:     20px;
+  color:         var(--color-text-primary);
+  text-decoration: none;
+  margin-bottom: 32px;
+}
+
+.nav { display: flex; flex-direction: column; gap: 4px; }
+
+.navItem {
+  padding:     10px 12px;
+  border-radius: 8px;
+  color:       var(--color-text-secondary);
+  text-decoration: none;
+  font-size:   15px;
+  transition:  background 0.15s, color 0.15s;
+}
+
+.navItem:hover,
+.navItem[data-active] {
+  background: var(--color-background-secondary);
+  color:      var(--color-text-primary);
+}
