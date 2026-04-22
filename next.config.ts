@@ -17,7 +17,6 @@ const nextConfig: NextConfig = {
   experimental: {
     // Enables the new React compiler for automatic memo optimization
     // (Next.js 15+ / React 19)
-    reactCompiler: false, // set true when stable in your Next version
   },
 };
 
