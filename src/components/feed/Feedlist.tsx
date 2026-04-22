@@ -117,16 +117,11 @@ export function FeedList() {
     isError,
   } = useInfiniteQuery({
     queryKey: ["feed"],
-    queryFn: ({ pageParam }) => {
-   
-      return fetchFeedPage(pageParam ?? null);
+    queryFn: ({ pageParam }: { pageParam: string | null }) => {
+      return fetchFeedPage(pageParam);
     },
-    getNextPageParam: (lastPage) => {
-      const next = lastPage.nextCursor ?? undefined;
-  
-      return next;
-    },
-    initialPageParam: null,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    initialPageParam: null as string | null,  // ← the fix
     staleTime: 30_000,
   });
 
