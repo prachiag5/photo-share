@@ -1,7 +1,6 @@
-// components/feed/FeedList.tsx
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useEffect, useRef } from "react";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { List, useListRef } from "react-window";
 import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
@@ -11,22 +10,93 @@ import { PostSkeleton } from "./PostSkeleton";
 import { prefetchImages } from "@/hooks/useImageLoader";
 import type { Post } from "@/types";
 
-// ─── Row — defined outside, stable reference ──────────────────────────────────
+const CARD_MAX_WIDTH  = 468;
+const IMAGE_ASPECT    = 5 / 4;
+const CARD_CHROME     = 76 + 60;
+const POST_ROW_HEIGHT = CARD_MAX_WIDTH * IMAGE_ASPECT + CARD_CHROME;
+const SENTINEL_ROW_HEIGHT = 80;
+
+const DEBUG = true;
+function log(g: string, m: string, d?: unknown) {
+  if (!DEBUG) return;
+  const s = "color:#7c3aed;font-weight:bold;";
+  d !== undefined
+    ? console.log(`%c[Feed:${g}]`, s, m, d)
+    : console.log(`%c[Feed:${g}]`, s, m);
+}
+function warn(g: string, m: string, d?: unknown) {
+  if (!DEBUG) return;
+  const s = "color:#d97706;font-weight:bold;";
+  d !== undefined
+    ? console.warn(`%c[Feed:${g}] ⚠`, s, m, d)
+    : console.warn(`%c[Feed:${g}] ⚠`, s, m);
+}
+
+// ── RowProps ──────────────────────────────────────────────────────────────────
 interface RowProps {
   posts: Post[];
   onDelete: (id: string) => void;
   onEdit: (post: Post) => void;
+  // Callback ref — stable function identity, handles remounts correctly
+  sentinelRef: (el: HTMLDivElement | null) => void;
+  isFetchingNextPage: boolean;
+  hasNextPage: boolean;
 }
 
+// ── Row ───────────────────────────────────────────────────────────────────────
 function Row({
   index,
   style,
   posts,
   onDelete,
   onEdit,
+  sentinelRef,
+  isFetchingNextPage,
+  hasNextPage,
 }: { index: number; style: React.CSSProperties } & RowProps) {
+
+  const isLastRow = index === posts.length;
+
+
+
+  if (isLastRow) {
+    return (
+      <div style={style}>
+        {/*
+         * sentinelRef is now a callback ref from useInfiniteScroll.
+         * When this div mounts,  sentinelRef(el)  attaches the observer.
+         * When this div unmounts, sentinelRef(null) disconnects it.
+         * No manual write-through needed.
+         */}
+        <div
+          ref={sentinelRef}
+          style={{
+            height: SENTINEL_ROW_HEIGHT,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            position: "relative",
+            outline:    DEBUG ? "2px dashed #7c3aed" : undefined,
+            background: DEBUG ? "rgba(124,58,237,0.05)" : undefined,
+          }}
+        >
+          {isFetchingNextPage && <PostSkeleton />}
+          {!hasNextPage && !isFetchingNextPage && (
+            <p style={{ fontSize: 13, color: "var(--color-text-tertiary)", margin: 0 }}>
+              You're all caught up
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   const post = posts[index];
-  if (!post) return null;
+  if (!post) {
+    warn("Row", `No post at index=${index}`);
+    return null;
+  }
+
   return (
     <div style={style}>
       <PostCard post={post} onDelete={onDelete} onEdit={onEdit} />
@@ -34,11 +104,10 @@ function Row({
   );
 }
 
-// ─── FeedList ─────────────────────────────────────────────────────────────────
+// ── FeedList ──────────────────────────────────────────────────────────────────
 export function FeedList() {
-  const queryClient = useQueryClient();
-  const listRef = useListRef(null); // no argument
-
+  const queryClient    = useQueryClient();
+  const listRef = useListRef(null);
   const {
     data,
     fetchNextPage,
@@ -48,8 +117,15 @@ export function FeedList() {
     isError,
   } = useInfiniteQuery({
     queryKey: ["feed"],
-    queryFn: ({ pageParam }) => fetchFeedPage(pageParam ?? null),
-    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    queryFn: ({ pageParam }) => {
+   
+      return fetchFeedPage(pageParam ?? null);
+    },
+    getNextPageParam: (lastPage) => {
+      const next = lastPage.nextCursor ?? undefined;
+  
+      return next;
+    },
     initialPageParam: null,
     staleTime: 30_000,
   });
@@ -57,6 +133,32 @@ export function FeedList() {
   const posts = useMemo(
     () => data?.pages.flatMap((page) => page.posts) ?? [],
     [data]
+  );
+
+
+
+  const rowCount = posts.length + 1;
+
+
+
+  const getRowHeight = useCallback(
+    (index: number) =>
+      index === posts.length ? SENTINEL_ROW_HEIGHT : POST_ROW_HEIGHT,
+    [posts.length]
+  );
+
+  const handleRowsRendered = useCallback(
+    (visibleRows: { startIndex: number; stopIndex: number }) => {
+      const { startIndex, stopIndex } = visibleRows;
+      const sentinelInRange = stopIndex >= posts.length;
+
+      const nextBatch = posts
+        .slice(stopIndex + 1, stopIndex + 4)
+        .filter((_, i) => stopIndex + 1 + i < posts.length)
+        .map((p) => p.imageUrl);
+      if (nextBatch.length > 0) prefetchImages(nextBatch);
+    },
+    [posts]
   );
 
   const handleDelete = useCallback(
@@ -80,109 +182,54 @@ export function FeedList() {
 
   const handleEdit = useCallback((_post: Post) => {}, []);
 
-// Replace getRowHeight in FeedList.tsx
-const CARD_MAX_WIDTH = 468;
-const IMAGE_ASPECT   = 5 / 4;   // 4:5 portrait — matches PostImage
-const CARD_CHROME    = 76 + 60; // header (76px) + body/caption (60px)
-
-const getRowHeight = useCallback(
-  (_index: number) => {
-    // All cards share the same height because images are all 4:5.
-    // Width is capped at 468px inside the feed column.
-    return CARD_MAX_WIDTH * IMAGE_ASPECT + CARD_CHROME;
-  },
-  [] // no deps — pure constant
-);
-
-  const handleRowsRendered = useCallback(
-    (visibleRows: { startIndex: number; stopIndex: number }) => {
-      const nextBatch = posts
-        .slice(visibleRows.stopIndex + 1, visibleRows.stopIndex + 4)
-        .map((p) => p.imageUrl);
-      prefetchImages(nextBatch);
-    },
-    [posts]
-  );
-
+  // sentinelRef is now a stable callback ref — handles mount/unmount correctly
   const { sentinelRef } = useInfiniteScroll({
-    onIntersect: fetchNextPage,
+    onIntersect: () => {
+      fetchNextPage();
+    },
     hasNextPage: !!hasNextPage,
-    isFetching: isFetchingNextPage,
+    isFetching:  isFetchingNextPage,
+  });
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!containerRef.current) return;
+    
   });
 
   if (isLoading) {
     return (
       <div>
-        {Array.from({ length: 4 }).map((_, i) => (
-          <PostSkeleton key={i} />
-        ))}
+        {Array.from({ length: 4 }).map((_, i) => <PostSkeleton key={i} />)}
       </div>
     );
   }
-
   if (isError) throw new Error("Failed to load feed");
-
   if (posts.length === 0) {
-    return (
-      <p style={{ textAlign: "center", padding: "48px 0" }}>
-        No posts yet. Be the first to share.
-      </p>
-    );
+    return <p style={{ textAlign: "center", padding: "48px 0" }}>No posts yet.</p>;
   }
 
   return (
-    /*
-     * height: 100% works because the chain above is now solid:
-     * html → body → #__next → layout .shell → .main → FeedList → here
-     * Every ancestor is height: 100%, overflow: hidden.
-     * No ancestor scrolls. Only react-window's List scrolls.
-     */
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-
-      {/* This div takes all available height and contains the List */}
-      <div style={{
-        flex: 1,
-        minHeight: 0,      /* critical — lets flex child shrink below content size */
-        overflow: "hidden",
-      }}>
+      <div ref={containerRef} style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
         <List
           listRef={listRef}
-          rowCount={posts.length}
+          rowCount={rowCount}
           rowHeight={getRowHeight}
           rowComponent={Row}
-          rowProps={{ posts, onDelete: handleDelete, onEdit: handleEdit }}
+          rowProps={{
+            posts,
+            onDelete:           handleDelete,
+            onEdit:             handleEdit,
+            sentinelRef,
+            isFetchingNextPage,
+            hasNextPage:        !!hasNextPage,
+          }}
           onRowsRendered={handleRowsRendered}
           overscanCount={2}
           style={{ height: "100%", width: "100%" }}
         />
       </div>
-
-      {/*
-       * Sentinel is OUTSIDE the List but INSIDE the scrollable react-window.
-       * Problem: react-window doesn't render elements outside its row range.
-       * Solution: place sentinel as a real DOM sibling below the List div,
-       * and use rootMargin on the IntersectionObserver to trigger early.
-       * The observer fires when the List's bottom edge is near the viewport.
-       */}
-      <div ref={sentinelRef} style={{ height: 1, flexShrink: 0 }} aria-hidden />
-
-      {isFetchingNextPage && (
-        <div style={{ padding: "16px 0", flexShrink: 0 }}>
-          <PostSkeleton />
-        </div>
-      )}
-
-      {!hasNextPage && posts.length > 0 && (
-        <p style={{
-          textAlign: "center",
-          padding: "16px 0",
-          fontSize: 13,
-          color: "var(--color-text-tertiary)",
-          flexShrink: 0,
-        }}>
-          You're all caught up
-        </p>
-      )}
     </div>
   );
 }
