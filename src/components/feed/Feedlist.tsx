@@ -9,6 +9,7 @@ import { PostCard } from "./PostCard";
 import { PostSkeleton } from "./PostSkeleton";
 import { prefetchImages } from "@/hooks/useImageLoader";
 import type { Post } from "@/types";
+import type { RowComponentProps } from "react-window";
 
 const CARD_MAX_WIDTH  = 468;
 const IMAGE_ASPECT    = 5 / 4;
@@ -44,16 +45,8 @@ interface RowProps {
 }
 
 // ── Row ───────────────────────────────────────────────────────────────────────
-function Row({
-  index,
-  style,
-  posts,
-  onDelete,
-  onEdit,
-  sentinelRef,
-  isFetchingNextPage,
-  hasNextPage,
-}: { index: number; style: React.CSSProperties } & RowProps) {
+function Row(props: RowComponentProps<RowProps>) {
+  const { index, style, posts, onDelete, onEdit, sentinelRef, isFetchingNextPage, hasNextPage } = props;
 
   const isLastRow = index === posts.length;
 
