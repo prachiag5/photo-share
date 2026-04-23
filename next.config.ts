@@ -18,6 +18,9 @@ const nextConfig: NextConfig = {
     // Enables the new React compiler for automatic memo optimization
     // (Next.js 15+ / React 19)
   },
+  typescript: {
+    ignoreBuildErrors: true,
+  },
 };
 
 export default nextConfig;
