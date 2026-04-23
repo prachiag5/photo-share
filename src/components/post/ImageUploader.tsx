@@ -1,12 +1,59 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
+// Define interfaces for type safety
+interface Crop {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+interface CompressionResult {
+  file: File;
+  dataUrl: string;
+  originalSize: number;
+  compressedSize: number;
+}
+
+interface ImageUploaderProps {
+  onComplete: (result: CompressionResult) => void;
+  onCancel: () => void;
+  accept?: string;
+  maxFileMB?: number;
+  compressionQuality?: number;
+}
+
+interface CropToolProps {
+  imageDataUrl: string;
+  onCropDone: (crop: Crop) => void;
+  onSkip: () => void;
+}
+
+interface CompressionBadgeProps {
+  originalSize: number;
+  compressedSize: number;
+}
+
+interface StageHeaderProps {
+  title: string;
+  subtitle: string;
+  onBack: () => void;
+}
+
+interface ErrorBannerProps {
+  message: string;
+}
+
+interface LoadingStateProps {
+  label: string;
+}
 
 // ─── Utility: blob → dataUrl ──────────────────────────────────────────────────
-function blobToDataUrl(blob) {
+function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
+    reader.onload = () => resolve(reader.result as string);
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
@@ -16,7 +63,7 @@ function blobToDataUrl(blob) {
 function useImageCompressor() {
   const [isCompressing, setIsCompressing] = useState(false);
 
-  const compress = useCallback(async (source, opts = {}) => {
+  const compress = useCallback(async (source: File | Blob, opts = {}) => {
     const {
       maxWidthPx = 1200,
       maxHeightPx = 1200,
@@ -34,6 +81,7 @@ function useImageCompressor() {
 
       const canvas = new OffscreenCanvas(width, height);
       const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Failed to get canvas context");
       ctx.drawImage(bitmap, 0, 0, width, height);
       bitmap.close();
 
@@ -55,7 +103,7 @@ function useImageCompressor() {
 
 // ─── Hook: useImageCrop (canvas-based) ───────────────────────────────────────
 function useImageCrop() {
-  const applyCrop = useCallback(async (imageDataUrl, crop) => {
+  const applyCrop = useCallback(async (imageDataUrl: string, crop: Crop): Promise<Blob> => {
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => {
@@ -63,6 +111,7 @@ function useImageCrop() {
         canvas.width = crop.width;
         canvas.height = crop.height;
         const ctx = canvas.getContext("2d");
+        if (!ctx) reject(new Error("Failed to get canvas context"));
         ctx.drawImage(img, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height);
         canvas.toBlob(
           (blob) => blob ? resolve(blob) : reject(new Error("Crop failed")),
@@ -78,8 +127,8 @@ function useImageCrop() {
 }
 
 // ─── Sub-component: CropTool ──────────────────────────────────────────────────
-function CropTool({ imageDataUrl, onCropDone, onSkip }) {
-  const canvasRef = useRef(null);
+function CropTool({ imageDataUrl, onCropDone, onSkip }: Readonly<CropToolProps>) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const imgRef = useRef(null);
   const isDragging = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
@@ -164,10 +213,10 @@ function CropTool({ imageDataUrl, onCropDone, onSkip }) {
     corners.forEach(([cx, cy]) => ctx.fillRect(cx, cy, cs, cs));
   }, [cropRect, canvasSize]);
 
-  const getPos = (e) => {
-    const rect = canvasRef.current.getBoundingClientRect();
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+  const getPos = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    const rect = canvasRef.current!.getBoundingClientRect();
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
     const scaleX = canvasSize.w / rect.width;
     const scaleY = canvasSize.h / rect.height;
     return {
@@ -176,14 +225,14 @@ function CropTool({ imageDataUrl, onCropDone, onSkip }) {
     };
   };
 
-  const onMouseDown = (e) => {
+  const onMouseDown = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     isDragging.current = true;
     const pos = getPos(e);
     dragStart.current = pos;
     setCropRect({ x: pos.x, y: pos.y, w: 0, h: 0 });
   };
 
-  const onMouseMove = (e) => {
+  const onMouseMove = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     if (!isDragging.current) return;
     const pos = getPos(e);
     const x = Math.min(dragStart.current.x, pos.x);
@@ -248,7 +297,7 @@ function CropTool({ imageDataUrl, onCropDone, onSkip }) {
 }
 
 // ─── Sub-component: CompressionBadge ─────────────────────────────────────────
-function CompressionBadge({ originalSize, compressedSize }) {
+function CompressionBadge({ originalSize, compressedSize }: Readonly<CompressionBadgeProps>) {
   const saved = Math.round((1 - compressedSize / originalSize) * 100);
   const fmt = (b) => b > 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} MB` : `${Math.round(b / 1024)} KB`;
   return (
@@ -269,7 +318,7 @@ function CompressionBadge({ originalSize, compressedSize }) {
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
-function btnStyle(variant) {
+function btnStyle(variant: "primary" | "ghost" | "danger") {
   const base = {
     padding: "9px 20px", borderRadius: 8, fontSize: 13, fontWeight: 500,
     cursor: "pointer", border: "none", transition: "opacity 0.15s",
@@ -310,18 +359,18 @@ export default function ImageUploader({
   accept = "image/jpeg,image/png,image/webp",
   maxFileMB = 20,
   compressionQuality = 0.82,
-}) {
+}: Readonly<ImageUploaderProps>) {
   // Stage: "select" | "crop" | "preview"
   const [stage, setStage] = useState("select");
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
 
   // Raw selected file + its dataUrl (original, uncropped)
-  const [rawDataUrl, setRawDataUrl] = useState(null);
-  const [rawFile, setRawFile] = useState(null);
+  const [rawDataUrl, setRawDataUrl] = useState<string | null>(null);
+  const [rawFile, setRawFile] = useState<File | null>(null);
 
   // After crop + compression
-  const [result, setResult] = useState(null);
+  const [result, setResult] = useState<CompressionResult | null>(null);
 
   const fileInputRef = useRef(null);
   const { compress, isCompressing } = useImageCompressor();
@@ -358,13 +407,14 @@ export default function ImageUploader({
   const onDragLeave = () => setIsDragOver(false);
 
   // ── After crop: apply crop → compress → show preview ─────────────────────
-  const handleCropDone = useCallback(async (naturalCrop) => {
+  const handleCropDone = useCallback(async (naturalCrop: Crop) => {
     try {
-      const croppedBlob = await applyCrop(rawDataUrl, naturalCrop);
+      const croppedBlob = await applyCrop(rawDataUrl!, naturalCrop);
       const compressed = await compress(croppedBlob, { quality: compressionQuality });
       setResult(compressed);
       setStage("preview");
-    } catch (e) {
+    } catch (error) {
+      console.error(error);
       setError("Something went wrong processing the image. Please try again.");
     }
   }, [rawDataUrl, applyCrop, compress, compressionQuality]);
@@ -372,10 +422,11 @@ export default function ImageUploader({
   // ── Skip crop: compress original directly ──────────────────────────────────
   const handleSkipCrop = useCallback(async () => {
     try {
-      const compressed = await compress(rawFile, { quality: compressionQuality });
+      const compressed = await compress(rawFile!, { quality: compressionQuality });
       setResult(compressed);
       setStage("preview");
-    } catch (e) {
+    } catch (error) {
+      console.error(error);
       setError("Compression failed. Please try again.");
     }
   }, [rawFile, compress, compressionQuality]);
@@ -509,7 +560,7 @@ export default function ImageUploader({
 }
 
 // ─── Tiny shared sub-components ───────────────────────────────────────────────
-function StageHeader({ title, subtitle, onBack }) {
+function StageHeader({ title, subtitle, onBack }: Readonly<StageHeaderProps>) {
   return (
     <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 4 }}>
       <button onClick={onBack} style={{
@@ -524,7 +575,7 @@ function StageHeader({ title, subtitle, onBack }) {
   );
 }
 
-function ErrorBanner({ message }) {
+function ErrorBanner({ message }: Readonly<ErrorBannerProps>) {
   return (
     <div style={{
       padding: "10px 14px", borderRadius: 8, marginTop: 8,
@@ -537,7 +588,7 @@ function ErrorBanner({ message }) {
   );
 }
 
-function LoadingState({ label }) {
+function LoadingState({ label }: Readonly<LoadingStateProps>) {
   return (
     <div style={{ textAlign: "center", padding: "32px 0", color: "var(--color-text-secondary)", fontSize: 13 }}>
       <div style={{
